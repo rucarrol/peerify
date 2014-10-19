@@ -9,11 +9,13 @@ $user=peer;
 $pass=peer;
 
 $asn=shift;
+if ( !defined($asn) ) { print "usage: ./peerify <asn>\n"; exit 1 ; }   
 
 $dsn = "DBI:mysql:database=$database;host=$hostname;port=$port";
 
 $dbh = DBI->connect('DBI:mysql:peering', $user , $pass ) || die "Could not connect to database: $DBI::errstr";
 
+## Lookup the Participant ID to use as foreign key elsewhere.
 $sth = $dbh->prepare("select id,asn,name from peerParticipants where asn = $asn");
 $sth->execute();
 $result = $sth->fetchrow_hashref();

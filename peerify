@@ -1,0 +1,78 @@
+#!/usr/bin/perl
+
+use DBI;
+
+$database=peering;
+$host=127.0.0.1;
+$port=5433;
+$user=peer;
+$pass=peer;
+
+$asn=shift;
+
+$dsn = "DBI:mysql:database=$database;host=$hostname;port=$port";
+
+$dbh = DBI->connect('DBI:mysql:peering', $user , $pass ) || die "Could not connect to database: $DBI::errstr";
+
+$sth = $dbh->prepare("select id,asn,name from peerParticipants where asn = $asn");
+$sth->execute();
+$result = $sth->fetchrow_hashref();
+$id=$result->{id};
+$peer_name=$result->{name};
+
+print "Found: $result->{name} (AS $result->{asn}, id=${id})\n";
+
+## Try get Technical contact details. 
+$sth = $dbh->prepare("select * From peerParticipantsContacts where participant_id=${id} and role=\"Technical\" ");
+$sth->execute();
+@result = $sth->fetchrow_array;
+$peer_email=@result[5];
+$peer_phone=@result[4];
+
+## Use ID to lookup which locations they are in.
+$sth = $dbh->prepare("select public_id,local_asn,local_ipaddr from peerParticipantsPublics  where participant_id=${id}");
+$sth->execute();
+
+while ( @result = $sth->fetchrow_array ) {
+	$ixp_id=@result[0];
+	$peer_asn=@result[1];
+	$peer_ip=@result[2];
+
+	## Get the IXP name, which we'll use to set the peer group. 
+	$ixp_qry = $dbh->prepare("select id,name  from mgmtPublics where id=$ixp_id");
+	$ixp_qry->execute();
+	while ( @ixp = $ixp_qry->fetchrow_array ) {
+		@results=split(" ", @ixp[1]) ;
+		$ixp_name=@results[0];
+		$ixp_name =~ s/-//g;
+		$ixp_name =~ tr/[a-z]/[A-Z/;
+	}
+
+	## We should lookup our local-address 
+	$local_addr_qry = $dbh->prepare("select local_ipaddr from peerParticipantsPublics  where participant_id=${id} and public_id=$ixp_id");
+	$local_addr_qry->execute();
+	while ( @addr = $local_addr_qry->fetchrow_array ) {
+		## PeeringDB - why is everything IPv4?!?!?!!?
+		$addr = @addr[0];
+		if ( $addr =~ /\:/ ) { $local_addr_v6 = $addr; } 
+		if ( $addr =~ /\./ ) { $local_addr_v4 = $addr; }
+	}
+
+        print "Generating Config for IXP $ixp_id \n";
+
+	if ( $peer_ip  =~ /\:/ ) { $ixp_name .= "_V6"; }
+	print "set protocols bgp group $ixp_name neighbor $peer_ip description \"$peer_name: $peer_phone $peer_email\"\n";
+	print "set protocols bgp group $ixp_name neighbor $peer_ip peer-as $peer_asn\n";
+	## Push v4 or v6 addr
+	if ( $peer_ip  =~ /\:/ ) { 
+        	print "set protocols bgp group $ixp_name neighbor $peer_ip local-address $local_addr_v6\n";
+	}
+        if ( $peer_ip  =~ /\./ ) {
+                print "set protocols bgp group $ixp_name neighbor $peer_ip local-address $local_addr_v4\n";
+        }
+
+}
+
+$dbh->disconnect();
+
+

@@ -1,19 +1,18 @@
 #!/usr/bin/perl
 
 use DBI;
+use warnings;
 
-$database=peering;
-$host=127.0.0.1;
-$port=5433;
-$user=peer;
-$pass=peer;
+$database="peering";
+$host="127.0.0.1";
+$port=3306;
+$user="peer";
+$pass="peer";
 
 $asn=shift;
 if ( !defined($asn) ) { print "usage: ./peerify <asn>\n"; exit 1 ; }   
 
-$dsn = "DBI:mysql:database=$database;host=$hostname;port=$port";
-
-$dbh = DBI->connect('DBI:mysql:peering', $user , $pass ) || die "Could not connect to database: $DBI::errstr";
+$dbh = DBI->connect("dbi:mysql:database=$database;host=$host;port=$port", $user , $pass ) || die "Could not connect to database: $DBI::errstr";
 
 ## Lookup the Participant ID to use as foreign key elsewhere.
 $sth = $dbh->prepare("select id,asn,name from peerParticipants where asn = $asn");
@@ -28,26 +27,28 @@ print "Found: $result->{name} (AS $result->{asn}, id=${id})\n";
 $sth = $dbh->prepare("select * From peerParticipantsContacts where participant_id=${id} and role=\"Technical\" ");
 $sth->execute();
 @result = $sth->fetchrow_array;
-$peer_email=@result[5];
-$peer_phone=@result[4];
+if ( defined ( $result[5] ) ) { $peer_email=$result[5]; } else { $peer_email="NO_CONTACT";}
+if ( defined ( $result[4] ) ) { $peer_phone=$result[4]; } else { $peer_phone="NO_CONTACT";}
+
 
 ## Use ID to lookup which locations they are in.
 $sth = $dbh->prepare("select public_id,local_asn,local_ipaddr from peerParticipantsPublics  where participant_id=${id}");
 $sth->execute();
 
-while ( @result = $sth->fetchrow_array ) {
-	$ixp_id=@result[0];
-	$peer_asn=@result[1];
-	$peer_ip=@result[2];
+while ( @peer_id = $sth->fetchrow_array ) {
+	$ixp_id=$peer_id[0];
+	$peer_asn=$peer_id[1];
+	$peer_ip=$peer_id[2];
 
 	## Get the IXP name, which we'll use to set the peer group. 
-	$ixp_qry = $dbh->prepare("select id,name  from mgmtPublics where id=$ixp_id");
+	$ixp_qry = $dbh->prepare("select id,name,city  from mgmtPublics where id=$ixp_id");
 	$ixp_qry->execute();
 	while ( @ixp = $ixp_qry->fetchrow_array ) {
-		@results=split(" ", @ixp[1]) ;
-		$ixp_name=@results[0];
+		@results=split(" ", $ixp[1]) ;
+		$ixp_name = $results[0];
 		$ixp_name =~ s/-//g;
 		$ixp_name =~ tr/[a-z]/[A-Z/;
+		$ixp_city = $ixp[2];
 	}
 
 	## We should lookup our local-address 
@@ -55,12 +56,12 @@ while ( @result = $sth->fetchrow_array ) {
 	$local_addr_qry->execute();
 	while ( @addr = $local_addr_qry->fetchrow_array ) {
 		## PeeringDB - why is everything IPv4?!?!?!!?
-		$addr = @addr[0];
+		$addr = $addr[0];
 		if ( $addr =~ /\:/ ) { $local_addr_v6 = $addr; } 
 		if ( $addr =~ /\./ ) { $local_addr_v4 = $addr; }
 	}
 
-        print "Generating Config for IXP $ixp_id \n";
+        print "Generating Config for IXP $ixp_city \n";
 
 	if ( $peer_ip  =~ /\:/ ) { $ixp_name .= "_V6"; }
 	print "set protocols bgp group $ixp_name neighbor $peer_ip description \"$peer_name: $peer_phone $peer_email\"\n";

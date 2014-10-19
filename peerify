@@ -61,7 +61,7 @@ while ( @peer_id = $sth->fetchrow_array ) {
 		if ( $addr =~ /\./ ) { $local_addr_v4 = $addr; }
 	}
 
-        print "Generating Config for IXP $ixp_city \n";
+        print "Generating Config for IXP $ixp_name in $ixp_city \n";
 
 	if ( $peer_ip  =~ /\:/ ) { $ixp_name .= "_V6"; }
 	print "set protocols bgp group $ixp_name neighbor $peer_ip description \"$peer_name: $peer_phone $peer_email\"\n";

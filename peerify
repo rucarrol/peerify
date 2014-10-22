@@ -1,30 +1,41 @@
 #!/usr/bin/perl
 
 use DBI;
-use warnings;
+#use warnings;
 
-$database="peering";
-$host="127.0.0.1";
+
+## Database Setup
+$database="";
+$host="";
 $port=3306;
-$user="peer";
-$pass="peer";
+$user="";
+$pass="";
 
-$asn=shift;
-if ( !defined($asn) ) { print "usage: ./peerify <asn>\n"; exit 1 ; }   
+## Local variables setup
+$my_asn = shift;
+$peer_asn = shift;
+
+if ( !defined($peer_asn) || !defined($my_asn)) { print "usage: ./peerify <my asn> <peer asn>\n"; exit 1 ; }   
 
 $dbh = DBI->connect("dbi:mysql:database=$database;host=$host;port=$port", $user , $pass ) || die "Could not connect to database: $DBI::errstr";
 
 ## Lookup the Participant ID to use as foreign key elsewhere.
-$sth = $dbh->prepare("select id,asn,name from peerParticipants where asn = $asn");
+$sth = $dbh->prepare("select id,asn,name from peerParticipants where asn = $peer_asn");
 $sth->execute();
 $result = $sth->fetchrow_hashref();
-$id=$result->{id};
+$peer_id=$result->{id};
 $peer_name=$result->{name};
 
-print "Found: $result->{name} (AS $result->{asn}, id=${id})\n";
+## Get my local ID for looking up our local-address later on 
+$sth = $dbh->prepare("select id from peerParticipants where asn = $my_asn");
+$sth->execute();
+$result = $sth->fetchrow_hashref();
+$my_id=$result->{id};
+
+print "Found: $peer_name (AS $peer_asn, id=$peer_id)\n";
 
 ## Try get Technical contact details. 
-$sth = $dbh->prepare("select * From peerParticipantsContacts where participant_id=${id} and role=\"Technical\" ");
+$sth = $dbh->prepare("select * From peerParticipantsContacts where participant_id=${peer_id} and role=\"Technical\" ");
 $sth->execute();
 @result = $sth->fetchrow_array;
 if ( defined ( $result[5] ) ) { $peer_email=$result[5]; } else { $peer_email="NO_CONTACT";}
@@ -32,7 +43,7 @@ if ( defined ( $result[4] ) ) { $peer_phone=$result[4]; } else { $peer_phone="NO
 
 
 ## Use ID to lookup which locations they are in.
-$sth = $dbh->prepare("select public_id,local_asn,local_ipaddr from peerParticipantsPublics  where participant_id=${id}");
+$sth = $dbh->prepare("select public_id,local_asn,local_ipaddr from peerParticipantsPublics  where participant_id=${peer_id}");
 $sth->execute();
 
 while ( @peer_id = $sth->fetchrow_array ) {
@@ -52,7 +63,7 @@ while ( @peer_id = $sth->fetchrow_array ) {
 	}
 
 	## We should lookup our local-address 
-	$local_addr_qry = $dbh->prepare("select local_ipaddr from peerParticipantsPublics  where participant_id=${id} and public_id=$ixp_id");
+	$local_addr_qry = $dbh->prepare("select local_ipaddr from peerParticipantsPublics  where participant_id=$my_id and public_id=$ixp_id");
 	$local_addr_qry->execute();
 	while ( @addr = $local_addr_qry->fetchrow_array ) {
 		## PeeringDB - why is everything IPv4?!?!?!!?
@@ -60,7 +71,7 @@ while ( @peer_id = $sth->fetchrow_array ) {
 		if ( $addr =~ /\:/ ) { $local_addr_v6 = $addr; } 
 		if ( $addr =~ /\./ ) { $local_addr_v4 = $addr; }
 	}
-
+	if ( !defined ( $local_addr_v6 ) && !defined ($local_addr_v4) ) { next; } 
         print "Generating Config for IXP $ixp_name in $ixp_city \n";
 
 	if ( $peer_ip  =~ /\:/ ) { $ixp_name .= "_V6"; }
@@ -73,6 +84,8 @@ while ( @peer_id = $sth->fetchrow_array ) {
         if ( $peer_ip  =~ /\./ ) {
                 print "set protocols bgp group $ixp_name neighbor $peer_ip local-address $local_addr_v4\n";
         }
+	$local_addr_v4=undef;
+	$local_addr_v6=undef;
 
 }
 

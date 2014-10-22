@@ -12,5 +12,5 @@ Output is JunOS (For now). Might add other platforms at another time.
 Usage:
 
 
-./peerify ASN
+./peerify <MY ASN> <PEER ASN>
 

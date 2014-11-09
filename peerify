@@ -5,6 +5,7 @@ use warnings;
 use Carp;
 use Net::Netconf::Manager;
 use JSON qw( decode_json );
+use Data::Dumper;
 
 
 # query execution status constants
@@ -13,7 +14,6 @@ use constant REPORT_FAILURE => 0;
 use constant STATE_CONNECTED => 1;
 use constant STATE_LOCKED => 2;
 use constant STATE_CONFIG_LOADED => 3;
-
 
 ## TODO: Implement a JSON file for config statements below
 ## Database Setup
@@ -35,6 +35,9 @@ $keyfile="";
 
 # JSON ixp peering-address to hostname mapping
 $ixp_to_router_mapping="router.json";
+
+## Perl hash to contain consolidated peer config
+our %router_cons_conf; 
 
 if ( !defined($peer_asn) || !defined($my_asn)) { print "usage: ./peerify <my asn> <peer asn>\n"; exit 1 ; }   
 
@@ -98,9 +101,9 @@ while ( @peer_id = $sth->fetchrow_array ) {
 		if ( $addr =~ /\:/ ) { $local_addr_v6 = $addr; } 
 		if ( $addr =~ /\./ ) { $local_addr_v4 = $addr; }
 	}
-## Hack - if link-local does not exist, then we dont have a common IXP. Skip to next. 
+## If link-local does not exist, then we dont have a common peering point in this specific IXP. Skip to next. 
 	if ( !defined ( $local_addr_v6 ) && !defined ($local_addr_v4) ) { next; } 
-	print "Generating Config for IXP $ixp_name in $ixp_city \n";
+	print "Found common peering point in $ixp_name in $ixp_city\n";
 
 	if ( $peer_ip  =~ /\:/ ) { $ixp_name .= "_V6"; $local_addr = $local_addr_v6;}
 	if ( $peer_ip  =~ /\./ ) { $local_addr = $local_addr_v4; }
@@ -108,14 +111,21 @@ while ( @peer_id = $sth->fetchrow_array ) {
 
 ## TODO: Probably a better way of doing this as it's god-awful ugly. 
 	$peer_xml = get_netconf_template( $ixp_name, $peer_ip, $peer_name, $peer_phone, $peer_email, $local_addr, $peer_asn ) ;
-
-	print $peer_xml;
-	print "Pushing config to $hostname\n";
-	push_conf($peer_xml, $hostname );
+	$router_cons_conf{$hostname} .= $peer_xml; 
 	$local_addr_v4=undef;
 	$local_addr_v6=undef;
 
 }
+
+## Iterate over the keys in the config hash to do a single push per device
+my @hosts = keys %router_cons_conf;
+for my $host (@hosts) {
+	## Wrap the config in a single <config> envelope 
+	my $conf = "<configuration>\n" . $router_cons_conf{$host} . "</configuration>\n\n"; 
+	print "pushing config to $host\n";
+	push_conf($conf, $host );
+}
+
 
 $dbh->disconnect();
 exit 0;
@@ -138,7 +148,6 @@ sub get_netconf_template {
 	my $peer_asn = shift; 
 
 	my $router_netconf_xml = <<END_MESSAGE;
-<configuration>
  <protocols>
   <bgp>
    <group>
@@ -152,7 +161,6 @@ sub get_netconf_template {
    </group>
   </bgp>
  </protocols>
-</configuration>
 END_MESSAGE
 
 	return $router_netconf_xml;
